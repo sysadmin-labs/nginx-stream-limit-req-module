@@ -3,9 +3,8 @@
 # Drive the limit against a real stream server and count what gets through.
 #
 # A test suite that speaks http cannot reach this module: it works on
-# connections, before a byte of payload has arrived, and the thing it
-# refuses is a connection and not a request.  So the client here is a few
-# lines of perl that open sockets and report what came back.
+# connections, before any payload has arrived, and what it refuses is a
+# connection, not a request.  The client is a few lines of perl.
 #
 # usage: ci/rate.sh <nginx binary>
 #
@@ -82,10 +81,9 @@ use warnings;
 use IO::Socket::INET;
 use Time::HiRes qw(time);
 
-# One run: open $n connections to $port as fast as the loop allows, read
-# whatever comes back, and print how many answered and how long it took.
-# A connection the module refused is closed before any payload, so it
-# reports an empty read -- which is exactly the difference we measure.
+# Open $n connections to $port as fast as the loop allows, read what comes
+# back, print how many answered and how long it took.  A refused connection
+# is closed before any payload, so it reads empty.
 
 my ($port, $n) = @ARGV;
 my $start = time;
@@ -112,9 +110,8 @@ printf "%d %.3f\n", $answered, time - $start;
 PERL
 
 cleanup() {
-	# every line survives a failure of its own: this runs from an EXIT
-	# trap under set -e, where a failed test aborts the function and
-	# makes its status the status of the whole script
+	# runs from an EXIT trap under set -e, where a failing line would
+	# abort the function and become the exit status of the script
 	if [ -f "$WORK/logs/nginx.pid" ]; then
 		kill -QUIT "$(cat "$WORK/logs/nginx.pid")" 2>/dev/null || true
 	fi
@@ -129,9 +126,8 @@ run() {
 	perl "$WORK/client.pl" "$1" "$2"
 }
 
-# The client prints "<answered> <seconds>".  Split by hand rather than with
-# set --, which shellcheck rightly dislikes: an unquoted substitution there
-# would split on anything the client ever printed with a space in it.
+# The client prints "<answered> <seconds>", split with parameter expansion
+# rather than set -- (SC2046).
 answered=0
 elapsed=0
 
@@ -141,40 +137,40 @@ measure() {
 	elapsed=${out##* }
 }
 
-echo "--- rate=1r/s, no burst: one connection gets through ---"
+echo "== rate=1r/s, no burst: expect 1 of 5"
 measure "$P1" 5
 echo "  5 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 1 ] || note "expected exactly 1 answer, got $answered"
 
-echo "--- rate=1r/s, burst=5 nodelay: six get through at once ---"
+echo "== rate=1r/s, burst=5 nodelay: expect 6 of 10, no delay"
 measure "$P2" 10
 echo "  10 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
-# nodelay means they are not held back: the whole run has to be quick
+# nodelay: nothing is held back, so the run has to be quick
 awk -v t="$elapsed" 'BEGIN { exit (t < 1.0) ? 0 : 1 }' ||
 	note "nodelay still took $elapsed s"
 
-echo "--- rate=5r/s, burst=5 delay=2: nothing is refused, some is held ---"
+echo "== rate=5r/s, burst=5 delay=2: expect 6 of 6, held back"
 measure "$P3" 6
 echo "  6 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
-# the third connection onwards waits 1/5 s each, so the run cannot be
-# instant; without the delay path this is well under a tenth of a second
+# from the third connection on each waits 1/5 s, so the run cannot be
+# instant; without the delay path it is under a tenth of a second
 awk -v t="$elapsed" 'BEGIN { exit (t > 0.4) ? 0 : 1 }' ||
 	note "the delayed run took only $elapsed s, nothing was held back"
 
-echo "--- dry run: everything gets through, the log says it would not ---"
+echo "== dry run: expect 5 of 5 and a log line"
 measure "$P4" 5
 echo "  5 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 5 ] || note "a dry run must not refuse anything, got $answered of 5"
 grep -q 'dry run limiting connections by zone "dry"' "$WORK/logs/error.log" ||
 	note "the dry run left no trace in the error log"
 
-echo "--- the refusals are logged ---"
+echo "== refusals are logged"
 grep -q 'limiting connections by zone "plain"' "$WORK/logs/error.log" ||
 	note "no log line for the refused connections"
 
-echo "--- nothing alarming in the error log ---"
+echo "== error log"
 if grep -qE '\[(alert|emerg)\]' "$WORK/logs/error.log"; then
 	note "alert or emerg in the error log"
 	grep -E '\[(alert|emerg)\]' "$WORK/logs/error.log" | head -3 >&2

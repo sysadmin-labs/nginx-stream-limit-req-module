@@ -1,9 +1,8 @@
 #!/bin/sh
 #
-# Build an nginx that carries this module.  The continuous integration
-# workflow runs this, and so can you:
+# Build an nginx that carries this module.  The CI workflows run this:
 #
-#     ci/build.sh 1.31.6 /tmp/nginx-test
+#     ci/build.sh 1.30.5 /tmp/nginx-test
 #     TEST_NGINX_BINARY=/tmp/nginx-test/sbin/nginx prove -r t/
 #
 # usage: ci/build.sh <nginx version> <install prefix> [mode]
@@ -24,10 +23,9 @@ SRC=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${CI_WORK:-$SRC/ci-work}
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 
-# Every version, digest and commit comes from one file, so a run here pins
-# exactly what a continuous integration run pins.  Deliberately not
-# overridable from the environment: a version and the digest that proves it
-# have to move together, and an override would separate them.
+# Every version and digest comes from one file, so a local run pins what a
+# CI run pins.  Not overridable from the environment: a version and its
+# digest have to move together.
 PINS=$SRC/.github/versions.env
 [ -r "$PINS" ] || {
 	echo "ci/build.sh: cannot read $PINS" >&2
@@ -42,9 +40,8 @@ tarball=$WORK/nginx-$NGINX.tar.gz
 url=https://nginx.org/download/nginx-$NGINX.tar.gz
 
 # The digest is looked up by version, so building another release means
-# writing its pin down first.  A missing pin is refused rather than waved
-# through: a check that skips itself when it has nothing to compare against
-# is not a check, it only looks like one.
+# adding its pin first.  A missing pin fails the build instead of being
+# waved through.
 key=NGINX_$(echo "$NGINX" | tr . _)_SHA256
 eval "want=\${$key:-}"
 if [ -z "$want" ]; then
@@ -74,10 +71,7 @@ esac
 
 cd "$WORK/nginx-$NGINX"
 
-# --with-stream is what this module needs: it lives in that subsystem and
-# a build without it has nowhere to put the module.  --with-http_ssl_module
-# is for the suite, which serves plain files over http to check that the
-# stream side did not disturb anything.
+# --with-stream is required: the module lives in that subsystem.
 
 # the sanitizer workflow builds through this script as well, so that
 # there is one build path and not two that drift apart
@@ -89,13 +83,12 @@ if [ -n "${CI_LD_OPT:-}" ]; then
 	set -- "$@" --with-ld-opt="$CI_LD_OPT"
 fi
 
-echo "--- configure ($MODE) ---"
+echo "== configure ($MODE)"
 ./configure --prefix="$PREFIX" --with-debug --with-stream \
-	--with-http_ssl_module "$how=$SRC" "$@" \
-	> "$WORK/configure-$NGINX.log" 2>&1 ||
+	"$how=$SRC" "$@" > "$WORK/configure-$NGINX.log" 2>&1 ||
 	{ tail -30 "$WORK/configure-$NGINX.log"; exit 1; }
 
-echo "--- make -j$JOBS ---"
+echo "== make -j$JOBS"
 make -j"$JOBS" > "$WORK/make-$NGINX.log" 2>&1 ||
 	{ tail -40 "$WORK/make-$NGINX.log"; exit 1; }
 

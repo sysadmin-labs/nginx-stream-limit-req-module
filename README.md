@@ -26,15 +26,15 @@
 [lint-badge]: https://github.com/sysadmin-labs/nginx-stream-limit-req-module/actions/workflows/lint.yml/badge.svg
 [lint-link]: https://github.com/sysadmin-labs/nginx-stream-limit-req-module/actions/workflows/lint.yml
 
-Rate limiting for the stream subsystem: `limit_req` the way the http block
-has always had it, for TCP and UDP.
+`limit_req` for the stream subsystem: rate limiting of incoming TCP and UDP
+connections, with the directives, the parameters and the leaky bucket of the
+http module of the same name.
 
 nginx ships `limit_conn` for stream, which caps how many connections are
 open at once, and `limit_req` only for http.  Nothing in the open source
-server limits how *fast* connections arrive at a stream listener, so a
-mail, database or VPN front end can be hammered with new connections as
-fast as the network allows while every one of them stays well inside the
-connection limit.
+server limits the rate at which connections arrive at a stream listener, so
+a mail, database or VPN front end can be fed new connections as fast as the
+network allows while staying inside the connection limit.
 
 ## Synopsis
 
@@ -63,21 +63,19 @@ stream {
 **syntax:** `limit_req_zone <key> zone=<name>:<size> rate=<rate>`
 **context:** `stream`
 
-Sets up the shared memory zone that keeps the state, exactly as the http
-directive of the same name does.  The key is any stream variable or a
-combination of them, usually `$binary_remote_addr`.  The rate is given as
-`r/s` or `r/m`; a zone smaller than eight pages is refused.
+Defines the shared memory zone holding the state.  The key is any stream
+variable or a combination of them, usually `$binary_remote_addr`.  The rate
+is given in `r/s` or `r/m`.  A zone smaller than eight pages is rejected.
 
 ### `limit_req`
 
 **syntax:** `limit_req zone=<name> [burst=<number>] [nodelay | delay=<number>]`
 **context:** `stream`, `server`
 
-Applies a zone.  Connections beyond the rate are refused unless `burst`
-allows them to queue; `nodelay` lets the whole burst through at once,
-`delay=N` lets the first N of it through at once and holds the rest back
-until the rate allows them.  Several zones may be applied to one server,
-and they are then all consulted.
+Applies a zone.  Connections above the rate are refused unless `burst`
+allows them to queue; `nodelay` passes the whole burst at once, `delay=N`
+passes the first N of it and holds the rest until the rate allows them.
+Several zones may be applied to one server and are then all consulted.
 
 ### `limit_req_log_level`
 
@@ -85,7 +83,7 @@ and they are then all consulted.
 **default:** `error`
 **context:** `stream`, `server`
 
-The level a refusal is logged at.  A delayed connection is logged one level
+Level a refusal is logged at.  A delayed connection is logged one level
 below that.
 
 ### `limit_req_dry_run`
@@ -94,14 +92,14 @@ below that.
 **default:** `off`
 **context:** `stream`, `server`
 
-Counts and logs as usual but lets everything through, so a rate can be
-measured against real traffic before it is enforced.
+Counts and logs as usual but passes everything, so a rate can be measured
+against production traffic before it is enforced.
 
-## How it behaves
+## Behaviour
 
-The module runs in the **preaccess phase**, before the connection reaches
-the content phase: nothing is proxied, nothing is sent upstream, and a
-refused connection is closed without a byte of payload having been read.
+The handler runs in the preaccess phase, before the content phase: nothing
+is proxied, and a refused connection is closed without a byte of payload
+having been read.
 
 A refusal is logged as
 
@@ -109,31 +107,31 @@ A refusal is logged as
 limiting connections by zone "perip", excess: 1.000
 ```
 
-and a dry run says `dry run limiting connections` instead.
+and a dry run writes `dry run limiting connections` instead.
 
-The arithmetic is the leaky bucket nginx uses in its own `limit_req` for
-http, so a rate configured here means the same thing it means there.
+The rate arithmetic is the one `ngx_http_limit_req_module` uses, so a rate
+configured here means what it means in an http block.
 
-## Building
+## Installation
 
-The module needs a stream enabled nginx:
+The module requires a stream enabled nginx:
 
 ```sh
 ./configure --with-stream --add-module=/path/to/nginx-stream-limit-req-module
 ```
 
-or, as a loadable module,
+or as a loadable module
 
 ```sh
 ./configure --with-stream \
     --add-dynamic-module=/path/to/nginx-stream-limit-req-module
 ```
 
-and then `load_module modules/ngx_stream_limit_req_module.so;` in the main
-context.  A build without `--with-stream` is refused at configure time
+with `load_module modules/ngx_stream_limit_req_module.so;` in the main
+context.  A build without `--with-stream` is rejected at configure time
 rather than failing at the link step.
 
-## Testing
+## Tests
 
 ```sh
 ci/build.sh 1.30.5 /tmp/nginx-test
@@ -142,12 +140,12 @@ ci/rate.sh /tmp/nginx-test/sbin/nginx
 ci/reload.sh /tmp/nginx-test/sbin/nginx
 ```
 
-`t/` covers the configuration parser, `ci/rate.sh` opens real sockets and
-counts what the limit lets through, and `ci/reload.sh` checks that the zone
-survives a reload.
+`t/` covers the configuration parser, `ci/rate.sh` opens sockets and counts
+what the limit passes, `ci/reload.sh` checks that the zone survives a
+reload.
 
 ## License
 
-BSD 2-Clause.  See [LICENSE](LICENSE).  The leaky bucket arithmetic follows
-nginx's own `ngx_http_limit_req_module`, Copyright (C) Igor Sysoev,
-Copyright (C) Nginx, Inc., under the same licence.
+BSD 2-Clause, see [LICENSE](LICENSE).  The rate arithmetic follows
+`ngx_http_limit_req_module`, Copyright (C) Igor Sysoev, Copyright (C)
+Nginx, Inc., under the same licence.

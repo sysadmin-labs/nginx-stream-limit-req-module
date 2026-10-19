@@ -2,11 +2,9 @@
  * Copyright (c) 2026, Jochen Neumeister <joneum@FreeBSD.org>
  * All rights reserved.
  *
- * The leaky bucket arithmetic follows the one nginx uses in its own
- * ngx_http_limit_req_module, Copyright (C) Igor Sysoev, Copyright (C)
- * Nginx, Inc., so that a rate configured here means the same thing it
- * means in an http block.  Everything that touches the stream session is
- * this module's own.
+ * The rate arithmetic follows ngx_http_limit_req_module, Copyright (C)
+ * Igor Sysoev, Copyright (C) Nginx, Inc., so that a rate configured here
+ * means what it means in an http block.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -215,8 +213,8 @@ ngx_stream_limit_req_cleanup(void *data)
 
     /*
      * The timer sits in the event tree and its memory belongs to the
-     * connection pool.  A connection that goes away while the delay is
-     * still running would leave the tree pointing into freed memory.
+     * connection pool: a connection going away during the delay would
+     * leave the tree pointing into freed memory.
      */
     if (sctx->event.timer_set) {
         ngx_del_timer(&sctx->event);
@@ -240,10 +238,9 @@ ngx_stream_limit_req_delay(ngx_event_t *ev)
     }
 
     /*
-     * The phase engine does not advance past a handler that answered
-     * NGX_AGAIN, so the handler runs once more when the phases are walked
-     * again.  Everything has been counted already, and this flag is what
-     * tells it so.
+     * The phase engine does not advance past a handler that returned
+     * NGX_AGAIN, so the handler runs again on the next walk.  This flag
+     * says the accounting has been done.
      */
     sctx->handled = 1;
 
@@ -362,9 +359,9 @@ ngx_stream_limit_req_handler(ngx_stream_session_t *s)
         }
 
         /*
-         * Everything that was counted on the way here has to be given
-         * back, otherwise a refused connection raises the excess of the
-         * zones in front of the one that refused it.
+         * Whatever was counted on the way here has to be given back, or a
+         * refused connection raises the excess of the zones in front of
+         * the one that refused it.
          */
         ngx_stream_limit_req_unlock(limits, n);
 
@@ -504,9 +501,9 @@ ngx_stream_limit_req_lookup(ngx_stream_limit_req_limit_t *limit,
 
             if (ms < -60000) {
                 /*
-                 * The clock went backwards by more than a minute.  Trust
+                 * The clock went backwards by more than a minute: trust
                  * the stored stamp rather than a negative age, which would
-                 * otherwise let a burst through.
+                 * let a burst through.
                  */
                 ms = 1;
 
