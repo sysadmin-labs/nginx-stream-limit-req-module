@@ -1,0 +1,39 @@
+name: Rate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Monday morning, so a new nginx release that breaks the module shows
+    # up here and not in somebody's build
+    - cron: '59 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rate:
+    name: what the limit lets through
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The suite in t/ can only reach the configuration parser: this module
+    # works on connections, before a byte of payload has arrived, and what
+    # it refuses is a connection.  So the rate itself is measured here, with
+    # sockets opened in a tight loop against a real stream server.
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+        with:
+          test-nginx: 'false'
+
+      - name: Build nginx
+        run: |
+          . .github/versions.env
+          ci/build.sh "$NGINX_VERSION" "$HOME/nginx"
+
+      - name: Refused, bursting, delayed and dry run
+        run: ci/rate.sh "$HOME/nginx/sbin/nginx"
