@@ -112,8 +112,12 @@ printf "%d %.3f\n", $answered, time - $start;
 PERL
 
 cleanup() {
-	[ -f "$WORK/logs/nginx.pid" ] &&
-		kill -QUIT "$(cat "$WORK/logs/nginx.pid")" 2>/dev/null
+	# every line survives a failure of its own: this runs from an EXIT
+	# trap under set -e, where a failed test aborts the function and
+	# makes its status the status of the whole script
+	if [ -f "$WORK/logs/nginx.pid" ]; then
+		kill -QUIT "$(cat "$WORK/logs/nginx.pid")" 2>/dev/null || true
+	fi
 	sleep 1
 }
 trap cleanup EXIT INT TERM
@@ -125,32 +129,44 @@ run() {
 	perl "$WORK/client.pl" "$1" "$2"
 }
 
+# The client prints "<answered> <seconds>".  Split by hand rather than with
+# set --, which shellcheck rightly dislikes: an unquoted substitution there
+# would split on anything the client ever printed with a space in it.
+answered=0
+elapsed=0
+
+measure() {
+	out=$(run "$1" "$2")
+	answered=${out%% *}
+	elapsed=${out##* }
+}
+
 echo "--- rate=1r/s, no burst: one connection gets through ---"
-set -- $(run $P1 5)
-echo "  5 connections, $1 answered in $2 s"
-[ "$1" -eq 1 ] || note "expected exactly 1 answer, got $1"
+measure "$P1" 5
+echo "  5 connections, $answered answered in $elapsed s"
+[ "$answered" -eq 1 ] || note "expected exactly 1 answer, got $answered"
 
 echo "--- rate=1r/s, burst=5 nodelay: six get through at once ---"
-set -- $(run $P2 10)
-echo "  10 connections, $1 answered in $2 s"
-[ "$1" -eq 6 ] || note "expected 6 answers, got $1"
+measure "$P2" 10
+echo "  10 connections, $answered answered in $elapsed s"
+[ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
 # nodelay means they are not held back: the whole run has to be quick
-awk -v t="$2" 'BEGIN { exit (t < 1.0) ? 0 : 1 }' ||
-	note "nodelay still took $2 s"
+awk -v t="$elapsed" 'BEGIN { exit (t < 1.0) ? 0 : 1 }' ||
+	note "nodelay still took $elapsed s"
 
 echo "--- rate=5r/s, burst=5 delay=2: nothing is refused, some is held ---"
-set -- $(run $P3 6)
-echo "  6 connections, $1 answered in $2 s"
-[ "$1" -eq 6 ] || note "expected 6 answers, got $1"
+measure "$P3" 6
+echo "  6 connections, $answered answered in $elapsed s"
+[ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
 # the third connection onwards waits 1/5 s each, so the run cannot be
 # instant; without the delay path this is well under a tenth of a second
-awk -v t="$2" 'BEGIN { exit (t > 0.4) ? 0 : 1 }' ||
-	note "the delayed run took only $2 s, nothing was held back"
+awk -v t="$elapsed" 'BEGIN { exit (t > 0.4) ? 0 : 1 }' ||
+	note "the delayed run took only $elapsed s, nothing was held back"
 
 echo "--- dry run: everything gets through, the log says it would not ---"
-set -- $(run $P4 5)
-echo "  5 connections, $1 answered in $2 s"
-[ "$1" -eq 5 ] || note "a dry run must not refuse anything, got $1 of 5"
+measure "$P4" 5
+echo "  5 connections, $answered answered in $elapsed s"
+[ "$answered" -eq 5 ] || note "a dry run must not refuse anything, got $answered of 5"
 grep -q 'dry run limiting connections by zone "dry"' "$WORK/logs/error.log" ||
 	note "the dry run left no trace in the error log"
 
