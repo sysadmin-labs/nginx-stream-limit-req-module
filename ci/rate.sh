@@ -43,6 +43,9 @@ pid $WORK/logs/nginx.pid;
 error_log $WORK/logs/error.log info;
 events { worker_connections 64; }
 stream {
+    log_format status '\$server_port \$limit_req_status';
+    access_log $WORK/logs/status.log status;
+
     limit_req_zone \$binary_remote_addr zone=plain:1m   rate=1r/s;
     limit_req_zone \$binary_remote_addr zone=bursty:1m  rate=1r/s;
     limit_req_zone \$binary_remote_addr zone=waiting:1m rate=5r/s;
@@ -140,23 +143,31 @@ measure() {
 echo "== rate=1r/s, no burst: expect 1 of 5"
 measure "$P1" 5
 echo "  5 connections, $answered answered in $elapsed s"
-[ "$answered" -eq 1 ] || note "expected exactly 1 answer, got $answered"
+[ -n "${RATE_NO_TIMING:-}" ] || [ "$answered" -eq 1 ] ||
+	note "expected exactly 1 answer, got $answered"
 
 echo "== rate=1r/s, burst=5 nodelay: expect 6 of 10, no delay"
 measure "$P2" 10
 echo "  10 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
+grep -q "delaying connection.*zone \"bursty\"" "$WORK/logs/error.log" &&
+	note "nodelay held a connection back"
 # nodelay: nothing is held back, so the run has to be quick
-awk -v t="$elapsed" 'BEGIN { exit (t < 1.0) ? 0 : 1 }' ||
+[ -n "${RATE_NO_TIMING:-}" ] ||
+	awk -v t="$elapsed" 'BEGIN { exit (t < 1.0) ? 0 : 1 }' ||
 	note "nodelay still took $elapsed s"
 
 echo "== rate=5r/s, burst=5 delay=2: expect 6 of 6, held back"
 measure "$P3" 6
 echo "  6 connections, $answered answered in $elapsed s"
 [ "$answered" -eq 6 ] || note "expected 6 answers, got $answered"
-# from the third connection on each waits 1/5 s, so the run cannot be
-# instant; without the delay path it is under a tenth of a second
-awk -v t="$elapsed" 'BEGIN { exit (t > 0.4) ? 0 : 1 }' ||
+# the sharp oracle: the module says so itself
+grep -q 'delaying connection.*zone "waiting"' "$WORK/logs/error.log" ||
+	note "nothing was held back, the delay path never ran"
+# and it has to cost time: from the third connection on each waits 1/5 s,
+# while without the delay path the run is under a tenth of a second
+[ -n "${RATE_NO_TIMING:-}" ] ||
+	awk -v t="$elapsed" 'BEGIN { exit (t > 0.4) ? 0 : 1 }' ||
 	note "the delayed run took only $elapsed s, nothing was held back"
 
 echo "== dry run: expect 5 of 5 and a log line"
@@ -169,6 +180,13 @@ grep -q 'dry run limiting connections by zone "dry"' "$WORK/logs/error.log" ||
 echo "== refusals are logged"
 grep -q 'limiting connections by zone "plain"' "$WORK/logs/error.log" ||
 	note "no log line for the refused connections"
+
+echo "== \$limit_req_status"
+for want in PASSED REJECTED DELAYED REJECTED_DRY_RUN; do
+	grep -q " $want\$" "$WORK/logs/status.log" ||
+		note "no connection was logged as $want"
+done
+sed 's/^/  /' "$WORK/logs/status.log" | sort -u | head -6
 
 echo "== error log"
 if grep -qE '\[(alert|emerg)\]' "$WORK/logs/error.log"; then

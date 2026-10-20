@@ -28,7 +28,8 @@
 
 `limit_req` for the stream subsystem: rate limiting of incoming TCP and UDP
 connections, with the directives, the parameters and the leaky bucket of the
-http module of the same name.
+http module of the same name.  `sync`, which belongs to nginx Plus, is not
+part of it.
 
 nginx ships `limit_conn` for stream, which caps how many connections are
 open at once, and `limit_req` only for http.  Nothing in the open source
@@ -95,6 +96,16 @@ below that.
 Counts and logs as usual but passes everything, so a rate can be measured
 against production traffic before it is enforced.
 
+## Variables
+
+### `$limit_req_status`
+
+What the module did with this connection: `PASSED`, `DELAYED`, `REJECTED`,
+`DELAYED_DRY_RUN` or `REJECTED_DRY_RUN`.  Not found on a connection that
+reached no `limit_req`.  A dry run is only visible through this variable and
+the error log, so an `access_log` carrying it is what a measurement before
+enforcement is read from.
+
 ## Behaviour
 
 The handler runs in the preaccess phase, before the content phase: nothing
@@ -107,7 +118,13 @@ A refusal is logged as
 limiting connections by zone "perip", excess: 1.000
 ```
 
-and a dry run writes `dry run limiting connections` instead.
+a connection held back by `burst` as
+
+```
+delaying connection, excess: 0.600, by zone "perip"
+```
+
+and a dry run writes `dry run` in front of either.
 
 The rate arithmetic is the one `ngx_http_limit_req_module` uses, so a rate
 configured here means what it means in an http block.

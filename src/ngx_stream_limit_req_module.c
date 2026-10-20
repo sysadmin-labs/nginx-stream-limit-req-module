@@ -80,12 +80,29 @@ typedef struct {
 
 typedef struct {
     ngx_uint_t                   status;      /* what happened to it */
-    ngx_uint_t                   handled;     /* the accounting is done */
+    unsigned                     handled:1;   /* the accounting is done */
+    unsigned                     delayed:1;   /* waiting on the timer below */
     ngx_event_t                  event;       /* the delay timer */
 } ngx_stream_limit_req_session_ctx_t;
 
 
+static ngx_str_t  ngx_stream_limit_req_status[] = {
+    ngx_string("PASSED"),
+    ngx_string("DELAYED"),
+    ngx_string("REJECTED"),
+    ngx_string("DELAYED_DRY_RUN"),
+    ngx_string("REJECTED_DRY_RUN")
+};
+
+
+static ngx_str_t  ngx_stream_limit_req_status_name =
+    ngx_string("limit_req_status");
+
+
 static void ngx_stream_limit_req_delay(ngx_event_t *ev);
+static ngx_int_t ngx_stream_limit_req_add_variables(ngx_conf_t *cf);
+static ngx_int_t ngx_stream_limit_req_status_variable(
+    ngx_stream_session_t *s, ngx_stream_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_stream_limit_req_lookup(
     ngx_stream_limit_req_limit_t *limit, ngx_uint_t hash, ngx_str_t *key,
     ngx_uint_t *ep, ngx_uint_t account);
@@ -156,7 +173,7 @@ static ngx_command_t  ngx_stream_limit_req_commands[] = {
 
 
 static ngx_stream_module_t  ngx_stream_limit_req_module_ctx = {
-    NULL,                                       /* preconfiguration */
+    ngx_stream_limit_req_add_variables,         /* preconfiguration */
     ngx_stream_limit_req_init,                  /* postconfiguration */
 
     NULL,                                       /* create main configuration */
@@ -181,6 +198,46 @@ ngx_module_t  ngx_stream_limit_req_module = {
     NULL,                                       /* exit master */
     NGX_MODULE_V1_PADDING
 };
+
+
+static ngx_int_t
+ngx_stream_limit_req_add_variables(ngx_conf_t *cf)
+{
+    ngx_stream_variable_t  *var;
+
+    var = ngx_stream_add_variable(cf, &ngx_stream_limit_req_status_name,
+                                  NGX_STREAM_VAR_NOCACHEABLE);
+    if (var == NULL) {
+        return NGX_ERROR;
+    }
+
+    var->get_handler = ngx_stream_limit_req_status_variable;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_stream_limit_req_status_variable(ngx_stream_session_t *s,
+    ngx_stream_variable_value_t *v, uintptr_t data)
+{
+    ngx_stream_limit_req_session_ctx_t  *sctx;
+
+    sctx = ngx_stream_get_module_ctx(s, ngx_stream_limit_req_module);
+
+    if (sctx == NULL || sctx->status == 0) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->len = ngx_stream_limit_req_status[sctx->status - 1].len;
+    v->data = ngx_stream_limit_req_status[sctx->status - 1].data;
+
+    return NGX_OK;
+}
 
 
 static void
@@ -225,10 +282,11 @@ ngx_stream_limit_req_cleanup(void *data)
 static void
 ngx_stream_limit_req_delay(ngx_event_t *ev)
 {
-    ngx_stream_session_t                *s = ev->data;
+    ngx_connection_t                    *c = ev->data;
+    ngx_stream_session_t                *s = c->data;
     ngx_stream_limit_req_session_ctx_t  *sctx;
 
-    ngx_log_debug0(NGX_LOG_DEBUG_STREAM, s->connection->log, 0,
+    ngx_log_debug0(NGX_LOG_DEBUG_STREAM, c->log, 0,
                    "stream limit_req delay is over");
 
     sctx = ngx_stream_get_module_ctx(s, ngx_stream_limit_req_module);
@@ -239,9 +297,10 @@ ngx_stream_limit_req_delay(ngx_event_t *ev)
 
     /*
      * The phase engine does not advance past a handler that returned
-     * NGX_AGAIN, so the handler runs again on the next walk.  This flag
-     * says the accounting has been done.
+     * NGX_AGAIN, so the handler runs again on the next walk.  These flags
+     * say the accounting has been done and the wait is over.
      */
+    sctx->delayed = 0;
     sctx->handled = 1;
 
     ngx_stream_core_run_phases(s);
@@ -273,8 +332,22 @@ ngx_stream_limit_req_handler(ngx_stream_session_t *s)
 
     sctx = ngx_stream_get_module_ctx(s, ngx_stream_limit_req_module);
 
-    if (sctx != NULL && sctx->handled) {
-        return NGX_DECLINED;
+    if (sctx != NULL) {
+
+        if (sctx->handled) {
+            return NGX_DECLINED;
+        }
+
+        /*
+         * The connection is parked on the delay timer.  Anything that walks
+         * the phases again before the timer fires, payload arriving on an
+         * edge or a session resumed from elsewhere, must not count a second
+         * time: the rate would then be charged once per event instead of
+         * once per connection.
+         */
+        if (sctx->delayed) {
+            return NGX_AGAIN;
+        }
     }
 
     if (sctx == NULL) {
@@ -406,10 +479,17 @@ ngx_stream_limit_req_handler(ngx_stream_session_t *s)
     }
 
     sctx->status = NGX_STREAM_LIMIT_REQ_DELAYED;
+    sctx->delayed = 1;
 
     sctx->event.handler = ngx_stream_limit_req_delay;
-    sctx->event.data = s;
     sctx->event.log = c->log;
+
+    /*
+     * The connection, not the session: ngx_add_timer() and ngx_del_timer()
+     * read ev->data as an ngx_connection_t to name the descriptor in a debug
+     * log, so anything else there is a wrong number at best.
+     */
+    sctx->event.data = c;
 
     ngx_add_timer(&sctx->event, delay);
 
