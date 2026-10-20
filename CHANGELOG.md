@@ -11,5 +11,7 @@
   what makes `limit_req_dry_run` readable from an access log.
 - A connection waiting on its delay is counted once, not once per event
   that walks the phases again while it waits.
+- The key is read in the preaccess phase, which the README now says, since a
+  variable that is only known later leaves the zone applying to nothing.
 - A build without `--with-stream` is rejected at configure time instead of
   failing at the link step.

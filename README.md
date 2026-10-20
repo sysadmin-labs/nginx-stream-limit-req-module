@@ -74,9 +74,15 @@ is given in `r/s` or `r/m`.  A zone smaller than eight pages is rejected.
 **context:** `stream`, `server`
 
 Applies a zone.  Connections above the rate are refused unless `burst`
-allows them to queue; `nodelay` passes the whole burst at once, `delay=N`
-passes the first N of it and holds the rest until the rate allows them.
-Several zones may be applied to one server and are then all consulted.
+allows them to queue, which is 0 by default; `nodelay` passes the whole
+burst at once, `delay=N` passes the first N of it and holds the rest until
+the rate allows them.  Several zones may be applied to one server and are
+then all consulted.
+
+The key is read in the preaccess phase, before the connection has sent
+anything, so a variable that is only known later is empty there and the zone
+then applies to nothing.  `$ssl_preread_server_name` is the obvious one:
+limiting by SNI is not possible with this module.
 
 ### `limit_req_log_level`
 
@@ -109,8 +115,10 @@ enforcement is read from.
 ## Behaviour
 
 The handler runs in the preaccess phase, before the content phase: nothing
-is proxied, and a refused connection is closed without a byte of payload
-having been read.
+is proxied, and a refused TCP connection is closed without a byte of payload
+having been read.  A UDP session exists because a datagram arrived, so there
+the first datagram is read and then dropped; what is counted is the session,
+one per datagram unless the client keeps sending from the same port.
 
 A refusal is logged as
 
@@ -129,7 +137,7 @@ and a dry run writes `dry run` in front of either.
 The rate arithmetic is the one `ngx_http_limit_req_module` uses, so a rate
 configured here means what it means in an http block.
 
-## Installation
+## Building
 
 The module requires a stream enabled nginx:
 
@@ -148,7 +156,7 @@ with `load_module modules/ngx_stream_limit_req_module.so;` in the main
 context.  A build without `--with-stream` is rejected at configure time
 rather than failing at the link step.
 
-## Tests
+## Testing
 
 ```sh
 ci/build.sh 1.30.5 /tmp/nginx-test

@@ -417,6 +417,13 @@ ngx_stream_limit_req_handler(ngx_stream_session_t *s)
     }
 
     if (rc == NGX_DECLINED) {
+
+        /*
+         * No zone applied, every key came out empty.  Saying so once keeps
+         * the phases from walking the whole list again on every event, and
+         * leaves $limit_req_status unset, which is what it means.
+         */
+        sctx->handled = 1;
         return NGX_DECLINED;
     }
 
