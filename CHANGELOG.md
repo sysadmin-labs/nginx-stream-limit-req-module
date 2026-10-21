@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.2 (2026-10-21)
+
+### Fixed
+
+- The gates that load the module named it without the stream subsystem it
+  resolves `ngx_stream_core_module` out of, and the suite let a glob build
+  the list, which sorts the submodule ahead of `ngx_stream_module.so`.
+  Both failed the `dlopen` with an undefined symbol, so a loadable build
+  went untested on Linux and on FreeBSD.  The module itself was never at
+  fault, and whoever writes `load_module` lines by hand needs the same
+  order.
+
 ## v0.1.1 (2026-10-21)
 
 ### Fixed
