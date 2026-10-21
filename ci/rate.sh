@@ -8,8 +8,10 @@
 #
 # usage: ci/rate.sh <nginx binary>
 #
-# Set RATE_LOAD_MODULE to the path of ngx_stream_limit_req_module.so to
-# test a loadable build.
+# Set RATE_LOAD_MODULE to the loadable objects a loadable build needs, in
+# the order nginx has to see them: ngx_stream_module.so first, because
+# ngx_stream_limit_req_module.so resolves ngx_stream_core_module out of it
+# and its dlopen fails without it.
 
 set -eu
 
@@ -32,7 +34,10 @@ note() {
 }
 
 load=
-[ -n "${RATE_LOAD_MODULE:-}" ] && load="load_module $RATE_LOAD_MODULE;"
+for so in ${RATE_LOAD_MODULE:-}; do
+	load="$load
+load_module $so;"
+done
 
 cat > "$WORK/conf/nginx.conf" <<CONF
 $load

@@ -74,8 +74,14 @@ jobs:
 
       - name: Run the test suite against the loaded modules
         run: |
+          # The stream subsystem has to be loaded before anything that
+          # lives inside it, and a plain glob puts the submodule first,
+          # where its dlopen fails on ngx_stream_core_module.
           mods=
-          for so in "$HOME"/nginx/modules/*.so; do
+          for so in "$HOME"/nginx/modules/ngx_stream_module.so \
+                    "$HOME"/nginx/modules/*.so; do
+            [ -e "$so" ] || continue
+            case " $mods " in *" $so "*) continue ;; esac
             mods="$mods $so"
           done
           echo "loading:$mods"

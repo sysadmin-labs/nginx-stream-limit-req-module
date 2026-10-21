@@ -46,5 +46,7 @@ jobs:
             # www/nginx ships this module as a loadable object, so that is
             # the build the package is made of and it is built here too
             ci/build.sh "$NGINX_VERSION" "$HOME/nginx-dyn" dynamic
-            RATE_LOAD_MODULE=$HOME/nginx-dyn/modules/ngx_stream_limit_req_module.so \
+            # the stream subsystem first: the submodule resolves
+            # ngx_stream_core_module out of it
+            RATE_LOAD_MODULE="$HOME/nginx-dyn/modules/ngx_stream_module.so $HOME/nginx-dyn/modules/ngx_stream_limit_req_module.so" \
               ci/rate.sh "$HOME/nginx-dyn/sbin/nginx"
