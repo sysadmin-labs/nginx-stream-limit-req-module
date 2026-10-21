@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.1 (2026-10-21)
+
+### Fixed
+
+- The module refused a build whose stream subsystem is a loadable object.
+  `--with-stream=dynamic` sets `$STREAM` to `DYNAMIC` and not to `YES`, and
+  the check in `config` took only `YES`, so configure stopped with
+  "requires --with-stream" on a build that had asked for exactly that.  It
+  is how the FreeBSD nginx ports build, and it is what ci/build.sh asks for
+  in its loadable mode now, so the build that found this is the one that
+  watches it.
+
 ## v0.1.0 (2026-10-20)
 
 - First release: `limit_req_zone` and `limit_req` for the stream subsystem,

@@ -3,7 +3,10 @@ ngx_addon_name=ngx_stream_limit_req_module
 # The module lives in the stream subsystem, so a build without --with-stream
 # has nothing to put it in.  Saying so here is friendlier than a link error
 # about ngx_stream_core_module half an hour later.
-if [ "$STREAM" != YES ]; then
+# DYNAMIC is what --with-stream=dynamic sets, which is how the subsystem
+# is built where the modules are loadable objects -- the FreeBSD nginx
+# ports do it that way.  Taking only YES turned that build away.
+if [ "$STREAM" != YES ] && [ "$STREAM" != DYNAMIC ]; then
     echo
     echo "$0: error: ngx_stream_limit_req_module requires --with-stream"
     echo

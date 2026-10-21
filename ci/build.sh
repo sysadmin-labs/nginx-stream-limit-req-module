@@ -71,7 +71,15 @@ esac
 
 cd "$WORK/nginx-$NGINX"
 
-# --with-stream is required: the module lives in that subsystem.
+# --with-stream is required: the module lives in that subsystem.  A
+# loadable build asks for it as a loadable object too, which is what a
+# binary built from the FreeBSD ports looks like, and which sets $STREAM to
+# DYNAMIC rather than YES.
+if [ "$MODE" = dynamic ]; then
+	stream=--with-stream=dynamic
+else
+	stream=--with-stream
+fi
 
 # the sanitizer workflow builds through this script as well, so that
 # there is one build path and not two that drift apart
@@ -84,7 +92,7 @@ if [ -n "${CI_LD_OPT:-}" ]; then
 fi
 
 echo "== configure ($MODE)"
-./configure --prefix="$PREFIX" --with-debug --with-stream \
+./configure --prefix="$PREFIX" --with-debug "$stream" \
 	"$how=$SRC" "$@" > "$WORK/configure-$NGINX.log" 2>&1 ||
 	{ tail -30 "$WORK/configure-$NGINX.log"; exit 1; }
 
